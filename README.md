@@ -100,3 +100,7 @@ Recordings are saved as `Grabación_YYYY-MM-DD_HH-MM-SS.<ext>`.
 - System audio is recorded from the *monitor* of the selected output (`<sink>.monitor`), and the microphone from the selected input, both via `pulsesrc`. When both are enabled they are mixed with `audiomixer`.
 - Audio devices are listed with `pactl -f json list sinks|sources`.
 - Everything lives in a single file, [`grabadora.py`](grabadora.py).
+
+## License
+
+[MIT](LICENSE) © 2026 Andres Mora Vanegas

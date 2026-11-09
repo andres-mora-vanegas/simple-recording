@@ -1,46 +1,59 @@
-# Grabadora
+# Simple Recording
 
-Grabador de pantalla sencillo para Linux Mint (X11), al estilo de Kooha.
-Graba la pantalla completa o un área, con audio del sistema y/o micrófono.
+A small, no-frills screen recorder for Linux (X11), inspired by Kooha.
+Record the whole screen or a region, with system audio and/or microphone, in one click.
 
-![Ventana principal de Grabadora](docs/captura.png)
+The app itself is called **Grabadora** and its interface is in Spanish.
 
-## Funciones
+![Main window](docs/captura.png)
 
-- **Pantalla completa o área**: en modo *Área* arrastras con el mouse el rectángulo a grabar (Esc o clic derecho cancela).
-- **Audio del sistema** y **micrófono**, juntos o por separado (se mezclan en una sola pista).
-- **Selección de dispositivos en la ventana principal**:
-  - 🔊 *Audio del sistema*: la salida (altavoces, audífonos…) cuyo sonido se graba.
-  - 🎤 *Micrófono*: la entrada que se graba.
-  - La opción *Predeterminado* muestra el nombre real del dispositivo que se usará.
-  - Si el dispositivo elegido se desconecta, se usa el predeterminado del sistema.
-  - Las listas se actualizan al volver a la ventana (por si conectas otro dispositivo).
-  - Cada lista se desactiva cuando su botón de audio está apagado.
-- **Mostrar u ocultar el puntero**.
-- **Pausar / continuar** y **detener y guardar**, con cronómetro.
-- Notificación al guardar con botones *Abrir* y *Mostrar en carpeta*.
+## Platform support
 
-## Ajustes (menú ☰)
-
-| Ajuste | Opciones |
+| Platform | Supported |
 |---|---|
-| Formato | MP4 (H.264 + AAC), MKV (H.264 + Opus), WebM (VP8 + Opus) |
-| Cuadros por segundo | 24, 30, 60 |
-| Espera antes de grabar | Sin espera, 3, 5, 10 segundos |
-| Guardar en | Carpeta de destino (por defecto `~/Videos`) |
-| Minimizar al grabar | Oculta la ventana para que no salga en el video |
+| Linux, X11 session (Linux Mint Cinnamon, Ubuntu on Xorg, …) | ✅ |
+| Linux, Wayland session | ❌ |
+| Windows / macOS | ❌ |
 
-Los ajustes se guardan en `~/.config/grabadora/ajustes.json`.
+It relies on Linux-specific pieces: X11 screen capture (`ximagesrc`), PulseAudio/PipeWire audio (`pulsesrc`, `pactl`), `notify-send`, `xdg-open` and D-Bus.
 
-## Requisitos
+## Features
 
-- Sesión **X11** (usa `ximagesrc`; no funciona en Wayland).
-- Python 3 con PyGObject (GTK 3).
-- GStreamer 1.0 con los plugins *good*, *bad*, *ugly* y *libav*.
-- PulseAudio o PipeWire (con `pactl`).
-- `notify-send` (libnotify) para las notificaciones.
+- **Full screen or area**: in *Área* mode, drag a rectangle with the mouse (Esc or right-click cancels).
+- **System audio** and **microphone**, together or separately (mixed into a single track).
+- **Audio devices shown right in the main window**:
+  - 🔊 *System audio*: the output (speakers, headphones…) whose sound is recorded.
+  - 🎤 *Microphone*: the input that is recorded.
+  - The *Predeterminado* (default) entry shows the real name of the device that will be used.
+  - If the chosen device is unplugged, the system default is used instead.
+  - The lists refresh when you return to the window, so newly plugged devices show up.
+  - Each list is greyed out when its audio toggle is off.
+- **Show or hide the mouse pointer**.
+- **Pause / resume** and **stop & save**, with an on-screen timer.
+- Desktop notification when saved, with *Open* and *Show in folder* buttons.
+- `--toggle` command line flag to start/stop from a keyboard shortcut.
 
-En Linux Mint / Ubuntu:
+## Settings (☰ menu)
+
+| Setting | Options |
+|---|---|
+| Format | MP4 (H.264 + AAC), MKV (H.264 + Opus), WebM (VP8 + Opus) |
+| Frame rate | 24, 30, 60 fps |
+| Delay before recording | none, 3, 5, 10 seconds |
+| Save to | Output folder (defaults to `~/Videos`) |
+| Minimize while recording | Hides the window so it doesn't appear in the video |
+
+Settings are stored in `~/.config/grabadora/ajustes.json`.
+
+## Requirements
+
+- An **X11** session.
+- Python 3 with PyGObject (GTK 3).
+- GStreamer 1.0 with the *good*, *bad*, *ugly* and *libav* plugins.
+- PulseAudio or PipeWire (with `pactl`).
+- `notify-send` (libnotify).
+
+On Linux Mint / Ubuntu / Debian:
 
 ```bash
 sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-gstreamer-1.0 \
@@ -48,41 +61,42 @@ sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-gstreamer-1.0 \
   gstreamer1.0-libav gstreamer1.0-pulseaudio pulseaudio-utils libnotify-bin
 ```
 
-## Instalación
+## Installation
 
-Para el usuario actual, sin sudo:
+For the current user, no sudo needed:
 
 ```bash
 ./instalar.sh
 ```
 
-Instala el programa en `~/.local/share/grabadora`, el comando `grabadora` en `~/.local/bin` y el lanzador en el menú como **Grabadora**.
+This installs the app in `~/.local/share/grabadora`, a `grabadora` command in `~/.local/bin`, and a **Grabadora** launcher in the applications menu.
 
-Desinstalar:
+Uninstall:
 
 ```bash
 ./instalar.sh --desinstalar
 ```
 
-También se puede ejecutar sin instalar:
+Or run it without installing:
 
 ```bash
 python3 grabadora.py
 ```
 
-## Uso
+## Usage
 
 ```bash
-grabadora            # abre la ventana
-grabadora --toggle   # empieza o detiene una grabación
+grabadora            # open the window
+grabadora --toggle   # start or stop a recording
 ```
 
-`--toggle` sirve para asignar un **atajo de teclado** (Configuración del sistema → Teclado → Atajos personalizados). Si hay una cuenta regresiva en curso, la cancela.
+Bind `grabadora --toggle` to a **keyboard shortcut** (System Settings → Keyboard → Shortcuts → Custom). If a countdown is running, it cancels it.
 
-Las grabaciones se guardan como `Grabación_AAAA-MM-DD_HH-MM-SS.<ext>`.
+Recordings are saved as `Grabación_YYYY-MM-DD_HH-MM-SS.<ext>`.
 
-## Cómo funciona
+## How it works
 
-- El video se captura con GStreamer (`ximagesrc`) y se codifica según el formato elegido.
-- El audio del sistema se graba desde el *monitor* de la salida elegida (`<salida>.monitor`) y el micrófono desde la entrada elegida, ambos con `pulsesrc`. Si se usan los dos, se mezclan con `audiomixer`.
-- Los dispositivos se listan con `pactl -f json list sinks|sources`.
+- Video is captured with GStreamer's `ximagesrc` and encoded according to the chosen format.
+- System audio is recorded from the *monitor* of the selected output (`<sink>.monitor`), and the microphone from the selected input, both via `pulsesrc`. When both are enabled they are mixed with `audiomixer`.
+- Audio devices are listed with `pactl -f json list sinks|sources`.
+- Everything lives in a single file, [`grabadora.py`](grabadora.py).

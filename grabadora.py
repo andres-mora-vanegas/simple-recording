@@ -23,6 +23,8 @@ gi.require_version("Pango", "1.0")
 from gi.repository import Gdk, Gio, GLib, Gst, Gtk, Pango  # noqa: E402
 
 APP_ID = "org.local.Grabadora"
+# Súbela en cada cambio: 1.0.0, 1.0.1, 1.0.2… (se muestra al pie de la ventana).
+VERSION = "1.0.1"
 CONFIG_DIR = os.path.join(GLib.get_user_config_dir(), "grabadora")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "ajustes.json")
 
@@ -77,6 +79,7 @@ CSS = b"""
 .timer { font-size: 40px; font-weight: bold; font-feature-settings: "tnum"; }
 .countdown { font-size: 64px; font-weight: bold; }
 .dim { opacity: 0.6; }
+.version { font-size: smaller; opacity: 0.5; }
 """
 
 
@@ -151,7 +154,23 @@ class Recorder:
         self.on_error = on_error
         self.on_finished = on_finished
         self.stopping = False
+        # La pausa no detiene el pipeline: poner fuentes en vivo (pulsesrc) y el
+        # audiomixer en PAUSED y volver a PLAYING desincroniza el mezclador y el
+        # audio se pierde al reanudar. En su lugar el pipeline sigue en PLAYING,
+        # se descartan los buffers capturados durante la pausa y se corren las
+        # marcas de tiempo de lo que viene después para que no quede un hueco.
+        self._lock = threading.Lock()
+        self._pause_start = None  # running time en que empezó la pausa actual
+        self._pauses = []  # pausas terminadas: [(inicio, fin)] en running time
         self.pipeline = Gst.parse_launch(self._describe(settings, area))
+        for name in ("vgate", "agate"):
+            gate = self.pipeline.get_by_name(name)
+            if gate is not None:
+                gate.get_static_pad("sink").add_probe(
+                    Gst.PadProbeType.BUFFER | Gst.PadProbeType.EVENT_DOWNSTREAM,
+                    self._gate_probe,
+                    {"src": gate.get_static_pad("src"), "segment": None, "shift": 0},
+                )
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
         bus.connect("message::eos", self._on_eos)
@@ -169,7 +188,8 @@ class Recorder:
         parts = [
             "%s ! video/x-raw,framerate=%d/1 ! queue max-size-buffers=0 "
             "max-size-bytes=0 max-size-time=3000000000 leaky=downstream ! videoconvert "
-            "! videoscale ! video/x-raw,format=I420 ! queue ! %s ! queue ! mux."
+            "! videoscale ! video/x-raw,format=I420 ! queue ! identity name=vgate "
+            "! %s ! queue ! mux."
             % (src, fps, venc),
             "%s name=mux ! filesink location=%s" % (mux, quote(self.path)),
         ]
@@ -192,11 +212,14 @@ class Recorder:
         audio_caps = "audioconvert ! audioresample ! audio/x-raw,rate=48000,channels=2"
         if len(sources) == 1:
             parts.append(
-                "%s ! queue ! %s ! %s ! queue ! mux."
+                "%s ! queue ! %s ! identity name=agate ! %s ! queue ! mux."
                 % (self._pulsesrc(sources[0]), audio_caps, aenc)
             )
         elif len(sources) == 2:
-            parts.append("audiomixer name=amix ! audioconvert ! %s ! queue ! mux." % aenc)
+            parts.append(
+                "audiomixer name=amix ! audioconvert ! identity name=agate ! %s "
+                "! queue ! mux." % aenc
+            )
             for device in sources:
                 parts.append(
                     "%s ! queue ! %s ! amix." % (self._pulsesrc(device), audio_caps)
@@ -214,17 +237,56 @@ class Recorder:
         if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
             raise RuntimeError("No se pudo iniciar la grabación.")
 
+    def _running_time(self):
+        clock = self.pipeline.get_clock()
+        if clock is None:
+            return 0
+        return max(0, clock.get_time() - self.pipeline.get_base_time())
+
     def pause(self):
-        self.pipeline.set_state(Gst.State.PAUSED)
+        with self._lock:
+            if self._pause_start is None:
+                self._pause_start = self._running_time()
 
     def resume(self):
-        self.pipeline.set_state(Gst.State.PLAYING)
+        with self._lock:
+            if self._pause_start is not None:
+                self._pauses.append((self._pause_start, self._running_time()))
+                self._pause_start = None
+
+    def _gate_probe(self, pad, info, state):
+        """Antes de cada codificador: descarta lo grabado en pausa y corre el resto."""
+        if info.type & Gst.PadProbeType.EVENT_DOWNSTREAM:
+            event = info.get_event()
+            if event.type == Gst.EventType.SEGMENT:
+                state["segment"] = event.parse_segment().copy()
+            return Gst.PadProbeReturn.OK
+        buf = info.get_buffer()
+        segment = state["segment"]
+        if buf.pts == Gst.CLOCK_TIME_NONE or segment is None:
+            return Gst.PadProbeReturn.OK
+        rt = segment.to_running_time(Gst.Format.TIME, buf.pts)
+        if rt == Gst.CLOCK_TIME_NONE:
+            return Gst.PadProbeReturn.OK
+        shift = 0
+        with self._lock:
+            if self._pause_start is not None and rt >= self._pause_start:
+                return Gst.PadProbeReturn.DROP
+            for start, end in self._pauses:
+                if rt >= end:
+                    shift += end - start
+                elif rt >= start:
+                    return Gst.PadProbeReturn.DROP
+        if shift != state["shift"]:
+            # Se aplica a este mismo buffer: el src pad reenvía el segmento corrido.
+            state["shift"] = shift
+            state["src"].set_offset(-shift)
+        return Gst.PadProbeReturn.OK
 
     def stop(self):
         if self.stopping:
             return
         self.stopping = True
-        self.pipeline.set_state(Gst.State.PLAYING)
         self.pipeline.send_event(Gst.Event.new_eos())
         # Si el EOS no llega (p. ej. un dispositivo trabado), cerrar igual.
         GLib.timeout_add_seconds(5, self._force_finish)
@@ -407,7 +469,12 @@ class MainWindow(Gtk.ApplicationWindow):
         self.stack.add_named(self._build_countdown_view(), "countdown")
         self.stack.add_named(self._build_recording_view(), "recording")
         self.stack.add_named(self._build_saving_view(), "saving")
-        self.add(self.stack)
+        version = Gtk.Label(label="v" + VERSION, margin_bottom=6)
+        version.get_style_context().add_class("version")
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        content.pack_start(self.stack, True, True, 0)
+        content.pack_end(version, False, False, 0)
+        self.add(content)
         self.connect("delete-event", self._on_delete)
 
     # ---------- Construcción de la interfaz ----------
